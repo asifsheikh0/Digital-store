@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Digital Clock V3</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #222;
+            color: white;
+            font-family: Arial, sans-serif;
+            flex-direction: column;
+        }
+        .clock {
+            font-size: 60px;
+            font-weight: bold;
+            padding: 20px;
+            border-radius: 10px;
+            transition: all 0.5s ease;
+        }
+        .style1 { background: #ff5733; color: #fff; }
+        .style2 { background: #33ff57; color: #000; }
+        .style3 { background: #3357ff; color: #fff; }
+        .style4 { background: #f4ff33; color: #000; }
+        .style5 { background: #ff33a8; color: #fff; }
+        .style6 { background: #33fff6; color: #000; }
+        .style7 { background: #a833ff; color: #fff; }
+        button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            font-size: 18px;
+            cursor: pointer;
+            border: none;
+            background: #fff;
+            color: #222;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="clock" class="clock style1"></div>
+    <button onclick="changeStyle()">Change Style</button>
+
+    <script>
+        function updateClock() {
+            const now = new Date();
+            let hours = now.getHours().toString().padStart(2, '0');
+            let minutes = now.getMinutes().toString().padStart(2, '0');
+            let seconds = now.getSeconds().toString().padStart(2, '0');
+            document.getElementById('clock').innerText = `${hours}:${minutes}:${seconds}`;
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        let styleIndex = 1;
+        function changeStyle() {
+            styleIndex = (styleIndex % 7) + 1;
+            document.getElementById('clock').className = `clock style${styleIndex}`;
+        }
+    </script>
+</body>
+</html>
