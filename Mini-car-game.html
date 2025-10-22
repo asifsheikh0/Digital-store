@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mini Car Game – Presentation Demo</title>
+  <style>
+    :root {
+      --bg: #0f1220;
+      --track: #1a1f36;
+      --lane: #2b3254;
+      --car: #27e0a6;
+      --obstacle: #ff5d73;
+      --text: #e8ecff;
+      --accent: #7aa2ff;
+    }
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: radial-gradient(1200px 800px at 70% -10%, #1f2648 0%, var(--bg) 55%);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+      overflow: hidden;
+    }
+    /* Center wrapper */
+    .wrap { position: relative; height: 100%; display: grid; place-items: center; }
+
+    canvas { 
+      width: min(92vw, 420px); 
+      height: min(92vh, 740px);
+      max-height: 92vh;
+      background: linear-gradient(#161a2e, #0d1022);
+      border-radius: 24px;
+      box-shadow: 0 10px 40px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.06);
+    }
+
+    .hud {
+      position: absolute; inset: 0; pointer-events: none; display: flex; align-items: flex-start; justify-content: space-between; padding: 16px 18px;
+      width: min(92vw, 420px); height: min(92vh, 740px);
+    }
+    .pill { background: rgba(122,162,255,.14); border: 1px solid rgba(122,162,255,.35); padding: 6px 10px; border-radius: 999px; font-size: 12px; letter-spacing: .3px; }
+
+    .overlay { position:absolute; inset:0; display:grid; place-items:center; width: min(92vw, 420px); height: min(92vh, 740px); }
+    .card { text-align:center; background: rgba(15,18,32,.7); border:1px solid rgba(255,255,255,.1); padding:24px; border-radius:20px; backdrop-filter: blur(6px); max-width: 86%; }
+    .title { font-size: 22px; margin: 0 0 8px; }
+    .muted { opacity:.8; font-size:14px; line-height:1.5; }
+    kbd { 
+      background:#161a2e; border:1px solid rgba(255,255,255,.18); border-bottom-color: rgba(255,255,255,.28);
+      padding: 2px 6px; border-radius: 6px; font-weight: 600; font-size: 12px;
+      box-shadow: 0 2px 0 rgba(0,0,0,.35);
+    }
+
+    /* Touch controls (auto-hide on wide screens) */
+    .touch { position:absolute; inset:0; display:flex; justify-content:space-between; align-items:flex-end; padding: 16px; width: min(92vw, 420px); height: min(92vh, 740px); }
+    .btn { pointer-events: auto; user-select:none; -webkit-user-select:none; background: rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14); padding: 14px 18px; border-radius: 16px; font-weight:700; }
+    .btn:active { transform: translateY(1px); }
+    @media (min-width: 720px) { .touch { display:none; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <canvas id="game" width="360" height="640" aria-label="Mini Car Game"></canvas>
+
+    <div class="hud" aria-hidden="true">
+      <div class="pill" id="scorePill">স্কোর: 0</div>
+      <div class="pill">⟵ <kbd>A</kbd>/<kbd>←</kbd>  •  <kbd>D</kbd>/<kbd>→</kbd> ⟶  ·  Pause: <kbd>P</kbd></div>
+    </div>
+
+    <div class="overlay" id="overlay">
+      <div class="card">
+        <h1 class="title">Mini Car Game</h1>
+        <p class="muted">বামে/ডানে মুভ করুন, উপরের বাধা এড়িয়ে চলুন।
+          <br/>শুরু করতে <kbd>Enter</kbd> চাপুন বা ট্যাপ করুন।</p>
+      </div>
+    </div>
+
+    <div class="touch" aria-hidden="true">
+      <button class="btn" id="leftBtn">◀ বাম</button>
+      <button class="btn" id="rightBtn">ডান ▶</button>
+    </div>
+  </div>
+
+  <script>
+    // --- Utility helpers ---
+    const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+
+    // --- Game constants ---
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+
+    const W = canvas.width, H = canvas.height;
+    const TRACK_X = 40, TRACK_W = W - TRACK_X * 2; // centered road
+    const LANE_COUNT = 3; // classic feature-phone vibe
+    const LANE_W = TRACK_W / LANE_COUNT;
+
+    const CAR_W = 36, CAR_H = 60;
+    const OB_W = 34, OB_H = 34;
+
+    let state = 'ready'; // 'ready' | 'playing' | 'paused' | 'gameover'
+    let score = 0, best = 0;
+
+    // Player/car
+    const player = {
+      lane: 1, // 0..2
+      x: 0,
+      y: H - 90,
+      speedX: 0,
+    };
+
+    // Obstacles list
+    const obstacles = [];
+
+    // Input
+    const input = { left: false, right: false };
+
+    // Timing
+    let last = 0;
+
+    // --- Initialize ---
+    function reset() {
+      obstacles.length = 0;
+      score = 0;
+      player.lane = 1;
+      player.x = laneCenterX(player.lane) - CAR_W / 2;
+      state = 'ready';
+      draw(0);
+    }
+
+    function laneCenterX(lane) {
+      return TRACK_X + lane * LANE_W + LANE_W / 2;
+    }
+
+    // --- Input handlers ---
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft' || e.key.toLowerCase() === 'a') input.left = true;
+      if (e.key === 'ArrowRight' || e.key.toLowerCase() === 'd') input.right = true;
+
+      if (e.key === 'Enter') {
+        if (state === 'ready' || state === 'gameover') start();
+      }
+      if (e.key.toLowerCase() === 'p') togglePause();
+    });
+    document.addEventListener('keyup', (e) => {
+      if (e.key === 'ArrowLeft' || e.key.toLowerCase() === 'a') input.left = false;
+      if (e.key === 'ArrowRight' || e.key.toLowerCase() === 'd') input.right = false;
+    });
+
+    // Touch buttons for mobile
+    const leftBtn = document.getElementById('leftBtn');
+    const rightBtn = document.getElementById('rightBtn');
+    const overlay = document.getElementById('overlay');
+    const scorePill = document.getElementById('scorePill');
+
+    function bindHold(btn, on, off){
+      btn.addEventListener('pointerdown', on);
+      btn.addEventListener('pointerup', off);
+      btn.addEventListener('pointerleave', off);
+      btn.addEventListener('touchstart', (e)=>{ e.preventDefault(); on(); }, {passive:false});
+      btn.addEventListener('touchend', off);
+    }
+    bindHold(leftBtn, ()=> input.left = true, ()=> input.left = false);
+    bindHold(rightBtn, ()=> input.right = true, ()=> input.right = false);
+
+    overlay.addEventListener('click', start);
+
+    function togglePause(){
+      if (state === 'playing') { state = 'paused'; showOverlay('Paused', 'চালু করতে আবার <kbd>P</kbd> বা <kbd>Enter</kbd> চাপুন।'); }
+      else if (state === 'paused') { state = 'playing'; hideOverlay(); }
+    }
+
+    function start(){
+      if (state === 'playing') return;
+      hideOverlay();
+      state = 'playing';
+      last = performance.now();
+      requestAnimationFrame(loop);
+    }
+
+    function gameOver(){
+      state = 'gameover';
+      best = Math.max(best, Math.floor(score));
+      showOverlay('Game Over', `স্কোর: <b>${Math.floor(score)}</b> · বেস্ট: <b>${best}</b><br/>আবার শুরু করতে <kbd>Enter</kbd> বা ট্যাপ করুন।`);
+    }
+
+    function showOverlay(title, msg){
+      overlay.innerHTML = `
+        <div class="card">
+          <h1 class="title">${title}</h1>
+          <p class="muted">${msg || 'শুরু করতে <kbd>Enter</kbd> চাপুন বা ট্যাপ করুন।'}</p>
+        </div>`;
+      overlay.style.display = 'grid';
+    }
+    function hideOverlay(){ overlay.style.display = 'none'; }
+
+    // --- Game loop ---
+    function loop(ts){
+      if (state !== 'playing') return;
+      const dt = Math.min(32, ts - last) / 1000; // clamp huge frame gaps
+      last = ts;
+
+      update(dt);
+      draw(dt);
+
+      requestAnimationFrame(loop);
+    }
+
+    function update(dt){
+      // Difficulty scales with time
+      const speed = 160 + Math.min(420, score * 1.6); // px/s downward
+      const spawnRate = 0.9 - Math.min(0.6, score / 250); // lower = more frequent
+
+      // Lane switching (discrete like old phones)
+      if (input.left && !input.right && player.lane > 0) { player.lane -= 1; input.left = false; }
+      if (input.right && !input.left && player.lane < LANE_COUNT - 1) { player.lane += 1; input.right = false; }
+      // Smoothly lerp x to lane center
+      const targetX = laneCenterX(player.lane) - CAR_W / 2;
+      player.x += (targetX - player.x) * Math.min(1, dt * 12);
+
+      // Spawn obstacles
+      if (Math.random() < dt / spawnRate) {
+        const lane = Math.floor(Math.random() * LANE_COUNT);
+        obstacles.push({ x: laneCenterX(lane) - OB_W/2, y: -OB_H, vy: speed });
+      }
+
+      // Move obstacles & check collisions
+      for (let i = obstacles.length - 1; i >= 0; i--) {
+        const ob = obstacles[i];
+        ob.y += ob.vy * dt;
+        if (ob.y > H + 60) { obstacles.splice(i,1); continue; }
+        if (rectsOverlap(player.x, player.y, CAR_W, CAR_H, ob.x, ob.y, OB_W, OB_H)) {
+          gameOver();
+          return;
+        }
+      }
+
+      // Score increases with time and dodges
+      score += dt * 10; // time-based points
+      scorePill.textContent = `স্কোর: ${Math.floor(score)}`;
+    }
+
+    function rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh){
+      return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+    }
+
+    // --- Rendering ---
+    let laneMarkerOffset = 0;
+    function draw(){
+      // Clear
+      ctx.clearRect(0,0,W,H);
+
+      // Track background
+      roundRect(ctx, TRACK_X, 0, TRACK_W, H, 14, '#0e1227', true);
+      // Inner asphalt
+      roundRect(ctx, TRACK_X+6, 6, TRACK_W-12, H-12, 12, '#151a33', true);
+
+      // Lane markers animated (gives motion feel)
+      laneMarkerOffset = (laneMarkerOffset + 4) % 40;
+      ctx.fillStyle = '#2e375f';
+      for (let l = 1; l < LANE_COUNT; l++) {
+        const x = TRACK_X + l * LANE_W;
+        for (let y = -40 + laneMarkerOffset; y < H; y += 40) {
+          ctx.fillRect(x - 2, y, 4, 18);
+        }
+      }
+
+      // Draw player car
+      drawCar(player.x, player.y, '#27e0a6');
+
+      // Draw obstacles
+      obstacles.forEach(ob => drawObstacle(ob.x, ob.y));
+    }
+
+    function roundRect(ctx, x, y, w, h, r, color, fill=true){
+      ctx.beginPath();
+      ctx.moveTo(x+r, y);
+      ctx.arcTo(x+w, y, x+w, y+h, r);
+      ctx.arcTo(x+w, y+h, x, y+h, r);
+      ctx.arcTo(x, y+h, x, y, r);
+      ctx.arcTo(x, y, x+w, y, r);
+      ctx.closePath();
+      if (fill){ ctx.fillStyle = color; ctx.fill(); } else { ctx.strokeStyle = color; ctx.stroke(); }
+    }
+
+    function drawCar(x, y, color){
+      // body
+      ctx.fillStyle = color;
+      roundRect(ctx, x, y, CAR_W, CAR_H, 8, color, true);
+      // windshield
+      ctx.fillStyle = 'rgba(255,255,255,.2)';
+      roundRect(ctx, x+6, y+8, CAR_W-12, 18, 6, ctx.fillStyle, true);
+      // lights
+      ctx.fillStyle = '#c9ffe6';
+      ctx.fillRect(x+6, y+CAR_H-6, 6, 3);
+      ctx.fillRect(x+CAR_W-12, y+CAR_H-6, 6, 3);
+      // tires
+      ctx.fillStyle = '#0a0d18';
+      ctx.fillRect(x-4, y+6, 6, 18);
+      ctx.fillRect(x+CAR_W-2, y+6, 6, 18);
+      ctx.fillRect(x-4, y+CAR_H-24, 6, 18);
+      ctx.fillRect(x+CAR_W-2, y+CAR_H-24, 6, 18);
+    }
+
+    function drawObstacle(x, y){
+      // A simple cone-like block
+      roundRect(ctx, x, y, OB_W, OB_H, 6, '#ff5d73', true);
+      ctx.fillStyle = 'rgba(255,255,255,.25)';
+      ctx.fillRect(x+6, y+12, OB_W-12, 6);
+    }
+
+    // Boot
+    reset();
+  </script>
+</body>
+</html>
